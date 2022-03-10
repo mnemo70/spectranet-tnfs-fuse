@@ -39,7 +39,7 @@ DEFAULT_HOST = "rasp4"
 #DEFAULT_HOST = "nihirash.net"
 
 # Timeout in seconds
-DEFAULT_TIMEOUT = 3
+DEFAULT_TIMEOUT = 15
 # Maximum number of bytes to show in dump command
 DUMP_MAX_BYTES = 0xffff
 
