@@ -46,7 +46,7 @@ DUMP_MAX_BYTES = 0xffff
 def printHelp():
     print("Commands:")
     print("  ls [-l] [-x] [<path>]                       List contents of remote directory")
-    print("  dir [-l] [<path>]                           Same as 'ls'")
+    print("  dir [-l] [-x] [<path>]                      Same as 'ls'")
     print("  l [<path>]                                  Short for ls -l")
     print("  lx [<path>]                                 Short for ls -lx")
     print("  cd <path>                                   Change remote directory")
@@ -534,6 +534,14 @@ class ReadDirXResponse(Response):
         self.entries = entries
         return self
 
+    def setStatus(self, status):
+        self.status = status
+        return self
+
+    def setDpos(self, dpos):
+        self.dpos = dpos
+        return self
+
     def do_DataToWire(self):
         return (f"{self.path}\0").encode("utf-8") if self.reply == 0 else b""
 
@@ -542,6 +550,8 @@ class ReadDirXResponse(Response):
             return self.reply, None
 
         entryCount, status, dpos = struct.unpack("<BBH", data[0:4])
+        self.setStatus(status)
+        self.setDpos(dpos)
         pos = 4
         entries = []
         for i in range(entryCount):
@@ -1024,6 +1034,9 @@ class Session:
         return r.reply, r.path
 
     def OpenDirX(self, path, pattern, dirOptions, sortOptions, maxResults):
+        # DirX is supported from tnfs v1.2
+        if self.version < "1.2":
+            return None, None, None
         data = self._SendReceive(OpenDirX().setPath(path).setPattern(pattern).setDirOptions(dirOptions).setSortOptions(sortOptions).setMaxResults(maxResults))
         r = OpenDirXResponse().fromWire(data)
         return r.reply, r.handle, r.entries
@@ -1133,9 +1146,11 @@ class Session:
 
         return contents
 
-    def ListDirX(self, path, pattern):
+    def ListDirX(self, path, pattern, dirOptions, sortOptions, maxResults = 65535):
         contents = []
-        reply, handle, numEntries = self.OpenDirX(path, pattern, 0, 0, 0xffff)
+        reply, handle, numEntries = self.OpenDirX(path, pattern, dirOptions, sortOptions, maxResults)
+        if reply is None:
+            return None
         while reply == 0 and numEntries > 0:
             reply, entries = self.ReadDirX(handle)
             numEntries -= len(entries)
@@ -1220,23 +1235,26 @@ if __name__ == "__main__":
                 size = free = None
                 if use_extdir:
                     pattern = command[2] if len(command) > 2 else ""
-                    files = S.ListDirX(path, pattern)
+                    files = S.ListDirX(path, pattern, 0, 0, 65535)
                     listing = []
-                    if not long_listing:
-                        for f in files:
-                            listing.append(f.name)
-                    else:
-                        if len(files) > 0:
-                            listing.append(f"{'TYPE':4}  {'SIZE':>10}  {'CREATED':19}  {'MODIFIED':19}  NAME")
+                    if files is not None:
+                        if not long_listing:
                             for f in files:
-                                flags, filesize, ctime, mtime, name = f.getData()
-                                if f.flags & 1:
-                                    filetype = "dir"
-                                else:
-                                    filetype = "file"
-                                ctimeStr = strftime("%Y-%m-%d %H:%M:%S", ctime)
-                                mtimeStr = strftime("%Y-%m-%d %H:%M:%S", mtime)
-                                listing.append(f"{filetype:4}  {filesize:>10}  {ctimeStr}  {mtimeStr}  {name}{'/' if f.flags & 1 else ''}")
+                                listing.append(f.name)
+                        else:
+                            if len(files) > 0:
+                                listing.append(f"{'TYPE':4}  {'SIZE':>10}  {'CREATED':19}  {'MODIFIED':19}  NAME")
+                                for f in files:
+                                    flags, filesize, ctime, mtime, name = f.getData()
+                                    if f.flags & 1:
+                                        filetype = "dir"
+                                    else:
+                                        filetype = "file"
+                                    ctimeStr = strftime("%Y-%m-%d %H:%M:%S", ctime)
+                                    mtimeStr = strftime("%Y-%m-%d %H:%M:%S", mtime)
+                                    listing.append(f"{filetype:4}  {filesize:>10}  {ctimeStr}  {mtimeStr}  {name}{'/' if f.flags & 1 else ''}")
+                    else:
+                        print("Extended listing not supported by server.")
                 else:
                     files = sorted(S.ListDir(path))
                     # Disabled - Commands currently not implemented in server
@@ -1270,7 +1288,6 @@ if __name__ == "__main__":
             elif command[0] == "cd":
                 if len(command) == 2:
                     path = command[1]
-                    print(f"cd path={path}")
                     cwd = fullPath(cwd, path)
                 else:
                     print("Syntax: cd <path>")
