@@ -492,6 +492,8 @@ class OpenDirXResponse(Response):
         return struct.pack("B", self.handle) if self.reply == 0 else b""
 
     def do_DataFromWire(self, data):
+        if len(data) < 3:
+            return None
         handle, entries = struct.unpack("<BH", data[0:3])
         if self.reply != 0:
             return None
@@ -1235,7 +1237,10 @@ if __name__ == "__main__":
                 size = free = None
                 if use_extdir:
                     pattern = command[2] if len(command) > 2 else ""
-                    files = S.ListDirX(path, pattern, 0, 0, 65535)
+                    # TODO Implement dirOptions and sortOptions
+                    dirOptions = 0
+                    sortOptions = 0
+                    files = S.ListDirX(path, pattern, dirOptions, sortOptions, 65535)
                     listing = []
                     if files is not None:
                         if not long_listing:
