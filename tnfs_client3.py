@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 
 # The MIT License
 #
@@ -123,7 +123,7 @@ def getCstr(data, pos):
     return string, end + 1
 
 def fullPath(cwd, path):
-    # TODO Use pathlib?
+    # TODO May use pathlib
     result = os.path.normpath(f"{cwd}/{path}").replace("\\", "/") if path[0] != "/" else path
 
     ## http://stackoverflow.com/questions/7816818/why-doesnt-os-normapath-collapse-a-leading-double-slash
