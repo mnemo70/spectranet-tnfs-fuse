@@ -735,9 +735,15 @@ def RunTests():
 	Test(CloseDirResponse, lambda m: m.setSession(0xbeef).setReply(255))
 
 class Session(object):
-	def __init__(self, address):
+	def __init__(self, address, tcp = False):
 		self.setSession(None)
-		self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+		self.tcp = tcp
+		if tcp:
+			self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+			self.sock.connect((address[0], address[1]))
+		else:
+			self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+			self.address = (socket.gethostbyname(address[0]), address[1])
 		self.sock.settimeout(30)
 		self.address = (socket.gethostbyname(address[0]), address[1])
 		self.sequence = 0
@@ -759,8 +765,12 @@ class Session(object):
 	def _SendReceive(self, message):
 		#print "Session: %x, Sequence:%r, Message: %r " % (self.session if self.session is not None else -1, self.sequence, message)
 		message.setRetry(self.sequence).setSession(self.session)
-		self.sock.sendto(message.toWire(), self.address)
-		data, _ = self.sock.recvfrom(1024)
+		if self.tcp:
+			self.sock.sendall(message.toWire())
+			data = self.sock.recv(1024)
+		else:
+			self.sock.sendto(message.toWire(), self.address)
+			data, _ = self.sock.recvfrom(1024)
 		#print "Return: %r" % data[4]
 		self.sequence += 1
 		self.sequence %= 256
@@ -914,11 +924,14 @@ class Session(object):
 if __name__ == "__main__":
 	#RunTests()
 
-	address = (sys.argv[1] if len(sys.argv) > 1 else 'vexed4.alioth.net', int(sys.argv[2]) if len(sys.argv) > 2 else 16384)
-	print "Connecting to %s:%d..." % address
+	args = [a for a in sys.argv if not a.startswith('--')]
+	address = (args[1] if len(args) > 1 else 'vexed4.alioth.net', int(args[2]) if len(args) > 2 else 16384)
+	tcp = "--tcp" in sys.argv
+	print("Connecting to {}:{} via {}...".format(address[0], address[1], 'tcp' if tcp else 'udp'))
+
 	command = ["ls"]
 	cwd = "/"
-	with Session(address) as S:
+	with Session(address, tcp) as S:
 		print "Remote server is version", S.version
 		while True:
 			if len(command) == 0:
