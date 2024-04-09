@@ -735,21 +735,39 @@ def RunTests():
 	Test(CloseDirResponse, lambda m: m.setSession(0xbeef).setReply(255))
 
 class Session(object):
-	def __init__(self, address, tcp = False):
+	def __init__(self, address, protocol):
 		self.setSession(None)
-		self.tcp = tcp
-		if tcp:
-			self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-			self.sock.connect((address[0], address[1]))
-		else:
-			self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-			self.address = (socket.gethostbyname(address[0]), address[1])
-		self.sock.settimeout(30)
-		self.address = (socket.gethostbyname(address[0]), address[1])
-		self.sequence = 0
 
-		reply, ver_maj, ver_min = self.Mount("/")
-		self.version = "%d.%d" % (ver_maj, ver_min)
+		if protocol == None or protocol == "tcp":
+			self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+			self.sock.settimeout(30)
+			try:
+				self.sock.connect((address[0], address[1]))
+			except socket.error:
+				if protocol == "tcp":
+					raise
+				else:
+					protocol = "udp"
+
+		if protocol == "udp":
+			self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+			self.sock.settimeout(30)
+			self.address = (socket.gethostbyname(address[0]), address[1])
+
+		self.sequence = 0
+		self.protocol = protocol
+
+		try:
+			reply, ver_maj, ver_min = self.Mount("/")
+			if self.protocol == None:
+				self.protocol = "tcp"
+			self.version = "%d.%d" % (ver_maj, ver_min)
+			print("Connected via %s." % (self.protocol))
+		except Exception:
+			if protocol == None:
+				return self.__init__(address, "udp")
+			else:
+				raise
 
 	def __enter__(self):
 		return self
@@ -765,7 +783,7 @@ class Session(object):
 	def _SendReceive(self, message):
 		#print "Session: %x, Sequence:%r, Message: %r " % (self.session if self.session is not None else -1, self.sequence, message)
 		message.setRetry(self.sequence).setSession(self.session)
-		if self.tcp:
+		if self.protocol == None or self.protocol == "tcp":
 			self.sock.sendall(message.toWire())
 			data = self.sock.recv(1024)
 		else:
@@ -926,12 +944,16 @@ if __name__ == "__main__":
 
 	args = [a for a in sys.argv if not a.startswith('--')]
 	address = (args[1] if len(args) > 1 else 'vexed4.alioth.net', int(args[2]) if len(args) > 2 else 16384)
-	tcp = "--tcp" in sys.argv
-	print("Connecting to {}:{} via {}...".format(address[0], address[1], 'tcp' if tcp else 'udp'))
+	protocol = None
+	if "--tcp" in sys.argv:
+		protocol = "tcp"
+	elif "--udp" in sys.argv:
+		protocol = "udp"
+	print("Connecting to {}:{}...".format(address[0], address[1]))
 
 	command = ["ls"]
 	cwd = "/"
-	with Session(address, tcp) as S:
+	with Session(address, protocol) as S:
 		print "Remote server is version", S.version
 		while True:
 			if len(command) == 0:
