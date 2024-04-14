@@ -974,20 +974,39 @@ def RunTests():
     # TODO Tests for OpenDirX, ReadDirX
 
 class Session:
-    def __init__(self, address, tcp = False):
+    def __init__(self, address, protocol = None):
         self.setSession(None)
-        self.tcp = tcp
-        if tcp:
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.sock.connect((address[0], address[1]))
-        else:
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            self.address = (socket.gethostbyname(address[0]), address[1])
-        self.sock.settimeout(DEFAULT_TIMEOUT)
-        self.sequence = 0
 
-        reply, ver_maj, ver_min = self.Mount("/")
-        self.version = f"{ver_maj}.{ver_min}"
+        if protocol == None or protocol == "tcp":
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.settimeout(DEFAULT_TIMEOUT)
+            try:
+                self.sock.connect((address[0], address[1]))
+            except socket.error:
+                if protocol == "tcp":
+                    raise
+                else:
+                    protocol = "udp"
+
+        if protocol == "udp":
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.sock.settimeout(DEFAULT_TIMEOUT)
+            self.address = (socket.gethostbyname(address[0]), address[1])
+
+        self.sequence = 0
+        self.protocol = protocol
+
+        try:
+            reply, ver_maj, ver_min = self.Mount("/")
+            if self.protocol == None:
+                self.protocol = "tcp"
+            self.version = f"{ver_maj}.{ver_min}"
+            print(f"Connected via {self.protocol}.")
+        except Exception:
+            if protocol == None:
+                return self.__init__(address, "udp")
+            else:
+                raise
 
     def __enter__(self):
         return self
@@ -1005,7 +1024,7 @@ class Session:
         #print(f"Session: 0x{sessionId:x}, Sequence: 0x{self.sequence:x}, Message: {repr(message)} ")
         message.setRetry(self.sequence).setSession(self.session)
         #print("Sending:\n" + dumpHex(message.toWire(), 65535))
-        if self.tcp:
+        if self.protocol == None or self.protocol == "tcp":
             self.sock.sendall(message.toWire())
             data = self.sock.recv(1024)
         else:
@@ -1200,12 +1219,16 @@ if __name__ == "__main__":
 
     args = [a for a in sys.argv if not a.startswith('--')]
     address = (args[1] if len(args) > 1 else DEFAULT_HOST, int(args[2]) if len(args) > 2 else 16384)
-    tcp = "--tcp" in sys.argv
-    print(f"Connecting to {address[0]}:{address[1]} via { 'tcp' if tcp else 'udp' }...")
+    protocol = None
+    if "--tcp" in sys.argv:
+        protocol = "tcp"
+    elif "--udp" in sys.argv:
+        protocol = "udp"
+    print(f"Connecting to {address[0]}:{address[1]}...")
     # Initial command
     command = ["ls"]
     cwd = "/"
-    with Session(address, tcp) as S:
+    with Session(address, protocol) as S:
         print(f"Remote server is version {S.version}")
         while True:
             # Handle ls aliases
