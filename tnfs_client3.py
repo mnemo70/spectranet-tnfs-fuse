@@ -87,6 +87,18 @@ class DirEntry:
 
     def getData(self):
         return self.flags, self.size, self.ctime, self.mtime, self.name
+    
+    def isDir(self):
+        return self.flags & 0x01
+
+    def isHidden(self):
+        return self.flags & 0x02
+
+    def isSpecial(self):
+        return self.flags & 0x04
+
+    def __repr__(self):
+        return f'{self.name} ({"d" if self.isDir() else self.size})'
 
 # Dump byte array in 16 hex columns plus ASCII representation
 def dumpHex(barray, maxBytes = 65535):
@@ -970,15 +982,38 @@ def RunTests():
     # TODO Tests for OpenDirX, ReadDirX
 
 class Session:
-    def __init__(self, address):
+    def __init__(self, address, protocol = None):
         self.setSession(None)
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.settimeout(DEFAULT_TIMEOUT)
-        self.address = (socket.gethostbyname(address[0]), address[1])
-        self.sequence = 0
 
-        reply, ver_maj, ver_min = self.Mount("/")
-        self.version = f"{ver_maj}.{ver_min}"
+        if protocol == None or protocol == "tcp":
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.settimeout(DEFAULT_TIMEOUT)
+            try:
+                self.sock.connect((address[0], address[1]))
+            except socket.error:
+                if protocol == "tcp":
+                    raise
+                else:
+                    protocol = "udp"
+
+        if protocol == "udp":
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.sock.settimeout(DEFAULT_TIMEOUT)
+            self.address = (socket.gethostbyname(address[0]), address[1])
+
+        self.sequence = 0
+        self.protocol = protocol
+
+        try:
+            reply, ver_maj, ver_min = self.Mount("/")
+            if self.protocol == None:
+                self.protocol = "tcp"
+            self.version = f"{ver_maj}.{ver_min}"
+        except Exception:
+            if protocol == None:
+                return self.__init__(address, "udp")
+            else:
+                raise
 
     def __enter__(self):
         return self
@@ -996,8 +1031,12 @@ class Session:
         #print(f"Session: 0x{sessionId:x}, Sequence: 0x{self.sequence:x}, Message: {repr(message)} ")
         message.setRetry(self.sequence).setSession(self.session)
         #print("Sending:\n" + dumpHex(message.toWire(), 65535))
-        self.sock.sendto(message.toWire(), self.address)
-        data, _ = self.sock.recvfrom(1024)
+        if self.protocol == None or self.protocol == "tcp":
+            self.sock.sendall(message.toWire())
+            data = self.sock.recv(1024)
+        else:
+            self.sock.sendto(message.toWire(), self.address)
+            data, _ = self.sock.recvfrom(1024)
         #print("Received:\n" + dumpHex(data, 65535))
         #print(f"Return: {data[4]}")
         self.sequence += 1
@@ -1185,12 +1224,19 @@ class Session:
 if __name__ == "__main__":
     # RunTests()
 
-    address = (sys.argv[1] if len(sys.argv) > 1 else DEFAULT_HOST, int(sys.argv[2]) if len(sys.argv) > 2 else 16384)
+    args = [a for a in sys.argv if not a.startswith('--')]
+    address = (args[1] if len(args) > 1 else DEFAULT_HOST, int(args[2]) if len(args) > 2 else 16384)
+    protocol = None
+    if "--tcp" in sys.argv:
+        protocol = "tcp"
+    elif "--udp" in sys.argv:
+        protocol = "udp"
     print(f"Connecting to {address[0]}:{address[1]}...")
     # Initial command
     command = ["ls"]
     cwd = "/"
-    with Session(address) as S:
+    with Session(address, protocol) as S:
+        print(f"Connected via {S.protocol}.")
         print(f"Remote server is version {S.version}")
         while True:
             # Handle ls aliases
