@@ -91,6 +91,18 @@ class DirEntry:
 
     def getData(self):
         return self.flags, self.size, self.ctime, self.mtime, self.name
+    
+    def isDir(self):
+        return self.flags & 0x01
+
+    def isHidden(self):
+        return self.flags & 0x02
+
+    def isSpecial(self):
+        return self.flags & 0x04
+
+    def __repr__(self):
+        return f'{self.name} ({"d" if self.isDir() else self.size})'
 
 # Dump byte array in 16 hex columns plus ASCII representation
 def dumpHex(barray, maxBytes = 65535):
@@ -1001,7 +1013,6 @@ class Session:
             if self.protocol == None:
                 self.protocol = "tcp"
             self.version = f"{ver_maj}.{ver_min}"
-            print(f"Connected via {self.protocol}.")
         except Exception:
             if protocol == None:
                 return self.__init__(address, "udp")
@@ -1229,6 +1240,7 @@ if __name__ == "__main__":
     command = ["ls"]
     cwd = "/"
     with Session(address, protocol) as S:
+        print(f"Connected via {S.protocol}.")
         print(f"Remote server is version {S.version}")
         while True:
             # Handle ls aliases
